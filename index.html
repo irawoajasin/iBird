@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>iBird</title>
+
+  <!-- Mapbox -->
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+
+  <!-- Turf.js -->
+  <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      background: #0b1320;
+    }
+
+    #map {
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+    <script>
+        mapboxgl.accessToken = 'pk.eyJ1IjoiemFyeWFqYXNpbiIsImEiOiJjbG9qbGNhYjMwaWdpMnFtaWMzNTM3Zzl4In0.aeODfKu-L03BARdLrvOZAA';
+
+        const NYC = [-74.0060, 40.7128];
+
+        const origins = [
+            { name: 'Southmost Chile', coords: [-70.3667, -56.1833], species: 'Greater Yellowlegs' },
+            { name: 'Panama', coords: [-79.537981, 8.782127], species: 'Chimney Swift' },
+            { name: 'Canada', coords: [-95.7129, 55.0902], species: 'Wood Thrush' }
+        ];
+
+        const map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/dark-v11',
+        center: [-40, 30],
+        zoom: 1.5
+        });
+
+        map.on('load', () => {
+        
+            // curved lines
+            const features = origins.map(origin => {
+                const line = turf.greatCircle(
+                    turf.point(origin.coords),
+                    turf.point(NYC),
+                    { npoints: 100 }
+                );
+
+                line.properties = {
+                    species: origin.species,
+                    origin: origin.name,
+                    distance: turf.length(line, { units: 'miles' }).toFixed(0)
+                };
+                return line;
+            });
+
+            map.addSource('migration-lines', {
+                type: 'geojson',
+                data: {
+                    type: 'FeatureCollection',
+                    features
+                }
+            });
+
+            map.addLayer({
+                id: 'migration-lines',
+                type: 'line',
+                source: 'migration-lines',
+                paint: {
+                'line-color': '#6ea8ff',
+                'line-width': 2,
+                'line-opacity': 0.8
+                }
+            });
+
+            // NYC point
+            map.addSource('nyc', {
+                type: 'geojson',
+                data: {
+                    type: 'FeatureCollection',
+                    features: [
+                        {
+                            type: 'Feature',
+                            geometry: {
+                                type: 'Point',
+                                coordinates: NYC
+                            }
+                        }
+                    ]
+                }
+            });
+
+            map.addLayer({
+                id: 'nyc-point',
+                type: 'circle',
+                source: 'nyc',
+                paint: {
+                'circle-radius': 5,
+                'circle-color': '#ffffff'
+                }
+            });
+
+            // click interaction
+            map.on('click', 'migration-lines', (e) => {
+                const feature = e.features[0];
+
+                // Popup with bird species and distance
+                new mapboxgl.Popup()
+                .setLngLat(e.lngLat)
+                .setHTML(
+                    `<strong>${feature.properties.species}</strong><br>` +
+                    `Origin: ${feature.properties.origin}<br>` +
+                    `Distance: ${feature.properties.distance} mi`
+                )
+                .addTo(map);
+            });
+
+            // Reset lines on clicking map background
+            map.on('click', (e) => {
+                if (!e.features || e.features.length === 0) {
+                map.setPaintProperty('migration-lines', 'line-opacity', 0.8);
+                map.setPaintProperty('migration-lines', 'line-width', 2);
+                }
+            });
+
+            // Change cursor to pointer when hovering over a line
+            map.on('mouseenter', 'migration-lines', () => {
+                map.getCanvas().style.cursor = 'pointer';
+            });
+            map.on('mouseleave', 'migration-lines', () => {
+                map.getCanvas().style.cursor = '';
+            });
+        });
+        
+    </script>
+</body>
+</html>
