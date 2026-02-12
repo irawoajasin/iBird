@@ -4,70 +4,104 @@
   <meta charset="utf-8" />
   <title>iBird</title>
 
+  <!--styling-->
+  <link rel="stylesheet" href="style.css">
+
   <!-- Mapbox -->
   <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
   <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
 
   <!-- Turf.js -->
   <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
-
-  <style>
-    body {
-      margin: 0;
-      background: #0b1320;
-    }
-
-    #map {
-      width: 100vw;
-      height: 100vh;
-    }
-  </style>
 </head>
 
 <body>
-  <div id="map"></div>
+    <div id="ui-panel">
+        <input id="origin-input" type="text" placeholder="Where are you traveling from?"/>
+        <button id="find-btn">Find My Bird</button>
+        <div id="result"></div>
+    </div>
+
+    <div id="map"></div>
 
     <script>
         mapboxgl.accessToken = 'pk.eyJ1IjoiemFyeWFqYXNpbiIsImEiOiJjbG9qbGNhYjMwaWdpMnFtaWMzNTM3Zzl4In0.aeODfKu-L03BARdLrvOZAA';
-
+        
         const NYC = [-74.0060, 40.7128];
 
-        const origins = [
-            { name: 'Southmost Chile', coords: [-70.3667, -56.1833], species: 'Greater Yellowlegs' },
-            { name: 'Panama', coords: [-79.537981, 8.782127], species: 'Chimney Swift' },
-            { name: 'Canada', coords: [-95.7129, 55.0902], species: 'Wood Thrush' }
-        ];
-
         const map = new mapboxgl.Map({
-        container: 'map',
-        style: 'mapbox://styles/mapbox/dark-v11',
-        center: [-40, 30],
-        zoom: 1.5
+            container: 'map',
+            style: 'mapbox://styles/mapbox/dark-v11',
+            center: [-40, 30],
+            zoom: 1.5
         });
+
+        let birdFeatures = [];
 
         map.on('load', () => {
         
-            // curved lines
-            const features = origins.map(origin => {
+            // load the CSV of bird info
+            fetch('birds.csv')
+            .then(res => res.text())
+            .then(csvText => {
+
+                const rows = csvText.trim().split('\n');
+                const headers = rows[0].split(',');
+
+                birdFeatures = rows.slice(1).map(row => {
+
+                const cols = row.split(',');
+
+                const species = cols[0].trim();
+                const originName = cols[1].trim();
+                const lat = parseFloat(cols[2].trim());
+                const lng = parseFloat(cols[3].trim());
+                const info = cols.slice(4).join(',').trim();
+
+                if (isNaN(lat) || isNaN(lng)) {
+                    console.log("Invalid coordinates for:", species);
+                    return null;
+                }
+
                 const line = turf.greatCircle(
-                    turf.point(origin.coords),
+                    turf.point([lng, lat]),
                     turf.point(NYC),
-                    { npoints: 100 }
+                    { npoints: 200 }
                 );
 
+                const distance = turf.length(line, { units: 'miles' });
+
+                if (isNaN(distance)) {
+                    console.log("Distance calculation failed for:", species);
+                    return null;
+                }
+
                 line.properties = {
-                    species: origin.species,
-                    origin: origin.name,
-                    distance: turf.length(line, { units: 'miles' }).toFixed(0)
+                    species,
+                    origin: originName,
+                    info,
+                    distance: Number(distance), // force number
+                    highlight: false
                 };
+
                 return line;
+                }).filter(f => f !== null);
+
+
+                console.log("Bird features loaded:", birdFeatures.length);
+
+                initializeMap();
             });
+        });
+
+
+        function initializeMap() {
 
             map.addSource('migration-lines', {
                 type: 'geojson',
                 data: {
                     type: 'FeatureCollection',
-                    features
+                    features: birdFeatures
                 }
             });
 
@@ -76,9 +110,19 @@
                 type: 'line',
                 source: 'migration-lines',
                 paint: {
-                'line-color': '#57068C',
-                'line-width': 2,
-                'line-opacity': 0.8
+                    'line-color': '#6ea8ff',
+                    'line-width': [
+                        'case',
+                        ['boolean', ['get', 'highlight'], false],
+                        4,
+                        2
+                    ],
+                    'line-opacity': [
+                        'case',
+                        ['boolean', ['get', 'highlight'], false],
+                        1,
+                        0.15
+                    ]
                 }
             });
 
@@ -87,8 +131,7 @@
                 type: 'geojson',
                 data: {
                     type: 'FeatureCollection',
-                    features: [
-                        {
+                    features: [{
                             type: 'Feature',
                             geometry: {
                                 type: 'Point',
@@ -104,43 +147,95 @@
                 type: 'circle',
                 source: 'nyc',
                 paint: {
-                'circle-radius': 5,
+                'circle-radius': 6,
                 'circle-color': '#ffffff'
                 }
             });
 
-            // click interaction
-            map.on('click', 'migration-lines', (e) => {
-                const feature = e.features[0];
+            setupInteraction();
+        }
 
-                // Popup with bird species and distance
-                new mapboxgl.Popup()
-                .setLngLat(e.lngLat)
-                .setHTML(
-                    `<strong>${feature.properties.species}</strong><br>` +
-                    `Origin: ${feature.properties.origin}<br>` +
-                    `Distance: ${feature.properties.distance} mi`
-                )
-                .addTo(map);
+
+        function setupInteraction() {
+            document.getElementById('find-btn').addEventListener('click', () => {
+
+                const input = document.getElementById('origin-input').value;
+
+                if (!input) return;
+
+                // Geocode user location using Mapbox
+                fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${input}.json?access_token=${mapboxgl.accessToken}`)
+                .then(res => res.json())
+                .then(data => {
+
+                    console.log(data);
+
+                    if (!data.features.length) return;
+
+                    const userCoords = data.features[0].center;
+                    const userPoint = turf.point(userCoords);
+
+                    const userDistance = turf.distance(
+                        userPoint,
+                        turf.point(NYC),
+                        { units: 'miles' }
+                    );
+
+                    let closestBird = null;
+                    let smallestDiff = Infinity;
+
+                    birdFeatures.forEach(f => {
+
+                        console.log("User distance:", userDistance);
+                        console.log("Bird distance:", f.properties.distance);
+
+                        const diff = Math.abs(userDistance - f.properties.distance);
+
+                        if (diff < smallestDiff) {
+                            smallestDiff = diff;
+                            closestBird = f;
+                        }
+
+                        f.properties.highlight = false;
+                    });
+
+                    if (!closestBird) {
+                        console.log("No closest bird found");
+                        return;
+                    }
+
+
+                    closestBird.properties.highlight = true;
+
+                    map.getSource('migration-lines').setData({
+                        type: 'FeatureCollection',
+                        features: birdFeatures
+                    });
+
+                    revealMatch(userDistance, closestBird);
+                });
+            });
+        }
+
+        function revealMatch(userDistance, birdFeature) {
+            map.flyTo({
+                center: birdFeature.geometry.coordinates[0],
+                zoom: 3,
+                speed: 0.8,
+                curve: 1.4
             });
 
-            // Reset lines on clicking map background
-            map.on('click', (e) => {
-                if (!e.features || e.features.length === 0) {
-                map.setPaintProperty('migration-lines', 'line-opacity', 0.8);
-                map.setPaintProperty('migration-lines', 'line-width', 2);
-                }
-            });
+            const panel = document.getElementById('result');
 
-            // Change cursor to pointer when hovering over a line
-            map.on('mouseenter', 'migration-lines', () => {
-                map.getCanvas().style.cursor = 'pointer';
-            });
-            map.on('mouseleave', 'migration-lines', () => {
-                map.getCanvas().style.cursor = '';
-            });
-        });
-        
+            panel.innerHTML= `
+                <h3>${birdFeature.properties.species}</h3>
+                <p><strong>Origin:</strong> ${birdFeature.properties.origin}</p>
+                <p><strong>Your distance:</strong> ${userDistance.toFixed(0)} miles</p>
+                <p><strong>Bird distance:</strong> ${birdFeature.properties.distance.toFixed(0)} miles</p>
+                <p>${birdFeature.properties.info}</p>
+                <p><em>You share a migratory distance.</em></p>
+            `;
+        }
     </script>
 </body>
 </html>

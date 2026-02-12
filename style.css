@@ -1,0 +1,48 @@
+body {
+    margin: 0;
+    background: #0b1320;
+    font-family: sans-serif;
+    overflow: hidden;
+}
+
+#map {
+    width: 100vw;
+    height: 100vh;
+}
+
+#ui-panel {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    width: 320px;
+    background: rgba(15, 20, 35, 0.95);
+    color: white;
+    padding: 16px;
+    z-index: 10;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+}
+
+#origin-input {
+    width: 100%;
+    padding: 6px;
+    margin-bottom: 8px;
+    background: #111;
+    border: 1px solid #333;
+    color: white;
+}
+
+#find-btn {
+    width: 100%;
+    padding: 6px;
+    background: #ab82c5;
+    border: none;
+    cursor: pointer;
+    color: black;
+    font-weight: bold;
+}
+
+#result {
+    margin-top: 16px;
+    font-size: 14px;
+    line-height: 1.4em;
+}
