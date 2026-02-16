@@ -12,9 +12,9 @@ body {
 
 #ui-panel {
     position: absolute;
-    top: 20px;
-    left: 20px;
-    width: 320px;
+    top: 3%;
+    left: 3%;
+    width: 25%;
     background: rgba(15, 20, 35, 0.95);
     color: white;
     padding: 16px;

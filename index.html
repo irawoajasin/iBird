@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>iBird</title>
+  <title>bird map</title>
 
   <!--styling-->
   <link rel="stylesheet" href="style.css">
@@ -17,6 +17,8 @@
 
 <body>
     <div id="ui-panel">
+        <h1>Welcome to the IBird Map</h1>
+        <p>These birds travel, and you did too! Type in where you came from and see what bird traveled the same distance as you.</p>
         <input id="origin-input" type="text" placeholder="Where are you traveling from?"/>
         <button id="find-btn">Find My Bird</button>
         <div id="result"></div>
@@ -38,6 +40,7 @@
 
         let birdFeatures = [];
 
+        // load bird data
         map.on('load', () => {
         
             // load the CSV of bird info
@@ -50,41 +53,42 @@
 
                 birdFeatures = rows.slice(1).map(row => {
 
-                const cols = row.split(',');
+                    const cols = row.split(',');
 
-                const species = cols[0].trim();
-                const originName = cols[1].trim();
-                const lat = parseFloat(cols[2].trim());
-                const lng = parseFloat(cols[3].trim());
-                const info = cols.slice(4).join(',').trim();
+                    const species = cols[0].trim();
+                    const originName = cols[1].trim();
+                    const lat = parseFloat(cols[2].trim());
+                    const lng = parseFloat(cols[3].trim());
+                    const info = cols.slice(4).join(',').trim();
 
-                if (isNaN(lat) || isNaN(lng)) {
-                    console.log("Invalid coordinates for:", species);
-                    return null;
-                }
+                    if (isNaN(lat) || isNaN(lng)) {
+                        console.log("Invalid coordinates for:", species);
+                        return null;
+                    }
 
-                const line = turf.greatCircle(
-                    turf.point([lng, lat]),
-                    turf.point(NYC),
-                    { npoints: 200 }
-                );
+                    const line = turf.greatCircle(
+                        turf.point([lng, lat]),
+                        turf.point(NYC),
+                        { npoints: 200 }
+                    );
 
-                const distance = turf.length(line, { units: 'miles' });
+                    const distance = turf.length(line, { units: 'miles' });
 
-                if (isNaN(distance)) {
-                    console.log("Distance calculation failed for:", species);
-                    return null;
-                }
+                    if (isNaN(distance)) {
+                        console.log("Distance calculation failed for:", species);
+                        return null;
+                    }
 
-                line.properties = {
-                    species,
-                    origin: originName,
-                    info,
-                    distance: Number(distance), // force number
-                    highlight: false
-                };
+                    line.properties = {
+                        species,
+                        origin: originName,
+                        info,
+                        distance: Number(distance), // force number
+                        highlight: false
+                    };
 
-                return line;
+                    return line;
+
                 }).filter(f => f !== null);
 
 
@@ -110,7 +114,7 @@
                 type: 'line',
                 source: 'migration-lines',
                 paint: {
-                    'line-color': '#6ea8ff',
+                    'line-color': '#ab82c5',
                     'line-width': [
                         'case',
                         ['boolean', ['get', 'highlight'], false],
@@ -232,8 +236,6 @@
                 <p><strong>Origin:</strong> ${birdFeature.properties.origin}</p>
                 <p><strong>Your distance:</strong> ${userDistance.toFixed(0)} miles</p>
                 <p><strong>Bird distance:</strong> ${birdFeature.properties.distance.toFixed(0)} miles</p>
-                <p>${birdFeature.properties.info}</p>
-                <p><em>You share a migratory distance.</em></p>
             `;
         }
     </script>
