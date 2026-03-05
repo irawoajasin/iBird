@@ -47,7 +47,7 @@
         map.on('load', () => {
 
             // load the CSV of bird info
-            fetch('jack_birds.csv')
+            fetch('jack_birds_cleaned.csv')
             .then(res => res.text())
             .then(csvText => {
 
@@ -59,32 +59,18 @@
 
                     //Common-Name,Scientific-Name,Location-Migration-North-Point,Lat-1,Lng-1,Location-Migration-South-Point,Lat-2,Lng-2,Distance-Migration-Total,Location-Direct,Lat-3,Lng-3,Location-Mirror,Lat-4,Lng-4,Distance-Migration-Start,Distance-Migration-End
                     const common_name = cols[0].trim();
-                    const sci_name = cols[1].trim();
-                    const loc_north = cols[2].trim();
-                    const lat1 = parseFloat(cols[3].trim());
-                    const lng1 = parseFloat(cols[4].trim());
-                    const loc_south = cols[5].trim();
-                    const lat2 = parseFloat(cols[6].trim());
-                    const lng2 = parseFloat(cols[7].trim());
-                    const loc_direct = cols[9].trim();
-                    const lat3 = parseFloat(cols[10].trim());
-                    const lng3 = parseFloat(cols[11].trim());
-                    const loc_mirror = cols[12].trim();
-                    const lat4 = parseFloat(cols[13].trim());
-                    const lng4 = parseFloat(cols[14].trim());
-                    const dist_total = parseFloat(cols[8].trim());
-                    const dist_start = parseFloat(cols[15].trim());
-                    const dist_end = parseFloat(cols[16].trim());
-                    const copy = cols[18].trim();
-                    const copy_mirrored = cols[19].trim();
+                    const loc_direct = cols[1].trim();
+                    const lat = parseFloat(cols[2].trim());
+                    const lng = parseFloat(cols[3].trim());
+                    const dist_total = parseFloat(cols[4].trim());
+                    const copy = cols[5].trim();
+                    const img_link = cols[6].trim();
                     
-                    const info = cols.slice(4).join(',').trim();
-                    console.log(info);
-
-                    if (isNaN(lat1) || isNaN(lng1)) return null;
+                    console.log(common_name);
+                    if (isNaN(lat) || isNaN(lng)) return null;
 
                     const line = turf.greatCircle(
-                        turf.point([lng1, lat1]),
+                        turf.point([lng, lat]),
                         turf.point(NYC),
                         { npoints: 200 }
                     );
@@ -95,27 +81,13 @@
                     line.properties = {
                         distance,
                         common_name,
-                        sci_name,
-                        loc_north,
-                        lat1,
-                        lng1,
-                        loc_south,
-                        lat2,
-                        lng2,
+                        lat,
+                        lng,
                         loc_direct,
-                        lat3,
-                        lng3,
-                        loc_mirror,
-                        lat4,
-                        lng4,
                         dist_total,
-                        dist_start,
-                        dist_end,
-                        info,
                         copy,
-                        copy_mirrored
+                        img_link
                     };
-
                     return line;
 
                 }).filter(f => f !== null);
@@ -156,7 +128,6 @@
                 let inputLocation = input; // from input textbox above
                 let commonPoint = "none";
                 let drawDoubleLine = false;
-                let useMirrorCopy = false;
                 let displayInfo = "";
                 let copy_to_use="";
                
@@ -164,66 +135,53 @@
                 birdFeatures.forEach(f => {
                     copy_to_use=f.properties.copy;
                     //before checking distance, first check if the location someone input has the same location as one of the birds
-                    let locations =[];
-                    locations[0] = String(f.properties.loc_north);
-                    locations[1] = String(f.properties.loc_south);
-                    locations[2] = String(f.properties.loc_direct);
-                    locations[3] = String(f.properties.loc_mirror);
-                    let latlongs=[];
-                    latlongs[0]=[f.properties.lng1,f.properties.lat1];
-                    latlongs[1]=[f.properties.lng2,f.properties.lat2];
-                    latlongs[2]=[f.properties.lng3,f.properties.lat3];
-                    latlongs[3]=[f.properties.lng4,f.properties.lat4];
-                    for (let i = 0; i < locations.length; i++) {
-                        let curr=locations[i];
-                        if ( input.toLowerCase() === curr.toLowerCase()){
-                            closestBird=f;
-                            commonPoint = curr;
-                            drawDoubleLine=true;
-                            displayInfo = "You and the "+f.properties.common_name+" both traveled to NYC from "+curr+"!";
-                            // if the location is found in the mirror, use Jack's specific mirror text for the bird 
-                            if (i==3){
-                                useMirrorCopy=true;
-                                copy_to_use=f.properties.copy_mirrored;
-                            }
+                   
+                    let location = String(f.properties.loc_direct);
+                    let latlongs=[f.properties.lng,f.properties.lat];
+                    if ( input.toLowerCase() === location.toLowerCase()){
+                        closestBird=f;
+                        commonPoint = location;
+                        drawDoubleLine=true;
+                        displayInfo = "You and the "+f.properties.common_name+" both traveled to NYC from "+location+"!";
+                        // if the location is found in the mirror, use Jack's specific mirror text for the bird 
+                        // if (i==3){
+                        //     useMirrorCopy=true;
+                        //     copy_to_use=f.properties.copy_mirrored;
+                        // }
                             //create birdLine
-                            latlongpt=latlongs[i];
                             closestBirdLine = turf.greatCircle(
-                                //turf.point([lng1, lat1]),
-                                turf.point(latlongs[i]),
+                                turf.point(latlongs),
                                 turf.point(NYC),
                                 { npoints: 200 }
                         );
                         f.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
                         return;
                         }
-                    }
-                    
-                    //only run the below if there is no matching location that both human and bird have been
-                    let distances=[];
-                    distances[0]=f.properties.dist_total;
-                    distances[1]=f.properties.dist_start;
-                    distances[2]=f.properties.dist_end;
-                    let remappedLatLongs=[];
-                    remappedLatLongs[0]=latlongs[2];
-                    remappedLatLongs[1]=latlongs[0];
-                    remappedLatLongs[2]=latlongs[1];
+                //     //123 AK
+                //     //only run the below if there is no matching location that both human and bird have been
+                //     let distances=f.properties.dist_total;
+                //     // let remappedLatLongs=[];
+                //     // remappedLatLongs[0]=latlongs[2];
+                //     // remappedLatLongs[1]=latlongs[0];
+                //     // remappedLatLongs[2]=latlongs[1];
 
-                    for (let i = 0; i < distances.length; i++) { 
-                        diff = Math.abs(userDistance - distances[i]);
-                        if (diff < smallestDiff) {
-                            smallestDiff = diff;
-                            closestBird = f;
-                            closestBirdLine = turf.greatCircle(
-                                //turf.point([lng1, lat1]),
-                                turf.point(remappedLatLongs[i]),
-                                turf.point(NYC),
-                                { npoints: 200 }
-                        );
-                        f.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
-                        }
-                    }
+                //     for (let i = 0; i < distances.length; i++) { 
+                //         diff = Math.abs(userDistance - distances[i]);
+                //         if (diff < smallestDiff) {
+                //             smallestDiff = diff;
+                //             closestBird = f;
+                //             closestBirdLine = turf.greatCircle(
+                //                 //turf.point([lng1, lat1]),
+                //                 turf.point(remappedLatLongs[i]),
+                //                 turf.point(NYC),
+                //                 { npoints: 200 }
+                //         );
+                //         f.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
+                //         }
+                //     }
+                  // //123 AK
                 });
+              
                 //for debug
                 console.log(commonPoint);
                 drawLines(humanLine, closestBirdLine);
