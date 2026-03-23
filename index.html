@@ -17,22 +17,33 @@
 </head>
 
 <body>
+    <div id="map"></div>
+
     <div id="ui-panel">
 
-        <!--mobile collapsable toggle (hidden on desktop)-->
-        <div id="panel-toggle">
-            <span>I Bird NYU</span>
-            <span class="chevron">˅</span>
+        <!--mobile online handle bar-->
+        <div id="panel-handle">
+            <div class="handle-bar"></div>
+            <div class="handle-row">
+                <span class="handle-title">I Bird NYU</span>
+                <span class="handle-chevron">˅</span>
+            </div>
         </div>
 
-        <h1>Welcome to the I Bird NYU Map</h1>
-        <p>These birds travel, and you did too! Type in the country or US/Canadian state where you came from and see what bird traveled a similar distance as you.</p>
-        <input id="origin-input" type="text" placeholder="Where are you traveling from?"/>
-        <button id="find-btn">Compare Migration</button>
-        <div id="result"></div>
-    </div>
+        <div id="panel-inner">
+            <h1 class="panel-title">Welcome to the I Bird NYU Map</h1>
+            <p class="panel-intro">These birds travel, and you did too! Type in the country or US/Canadian state where you came from and see what bird traveled a similar distance as you.</p>
 
-    <div id="map"></div>
+            <input id="origin-input" type="text" placeholder="Where are you traveling from?" autocomplete="off" />
+            <button id="find-btn">
+                <span class="btn-label">Compare Migration</span>
+                <div class="spinner"></div>
+            </button>
+
+            <div id="error-msg"></div>
+            <div id="result"></div>
+        </div>
+    </div>
 
     <script>
         mapboxgl.accessToken = 'pk.eyJ1IjoiemFyeWFqYXNpbiIsImEiOiJjbG9qbGNhYjMwaWdpMnFtaWMzNTM3Zzl4In0.aeODfKu-L03BARdLrvOZAA';
@@ -51,16 +62,24 @@
         });
 
         let birdFeatures = [];
-        //let NYCbirdFeatures=[];
         let humanLines = [];
         let birdLines = [];
 
+        const isMobile = () => window.innerWidth <= 640;
+
         // mobile panel toggle
         const panel = document.getElementById('ui-panel');
-        document.getElementById('panel-toggle').addEventListener('click', () => {
-            panel.classList.toggle('collapsed');
-        })
+        const handle = document.getElementById('panel-handle');
 
+        handle.addEventListener('click', () => {
+            if (window.innerWidth <= 640) {
+                panel.classList.toggle('collapsed');
+            }
+        });
+
+        if (window.innerWidth <= 640) {
+            panel.classList.add('collapsed');
+        }
 
         // load bird data
         map.on('load', () => {
@@ -123,12 +142,23 @@
             'brooklyn', 'queens', 'bronx', 'staten island', 'new york, ny'
         ];
 
-        function isNYCInput(input) {
-            return NYC_ALIASES.includes(input.toLowerCase().trim());
+        const isNYCInput  = s => NYC_ALIASES.includes(s.toLowerCase().trim());
+        const isTooClose  = m => m < CIRCLE_THRESHOLD_MILES;
+
+        function setLoading(on) {
+            const btn = document.getElementById('find-btn');
+            btn.disabled = on;
+            btn.classList.toggle('loading', on);
         }
 
-        function isClose(distanceMiles) {
-            return distanceMiles < CIRCLE_THRESHOLD_MILES;
+        function showError(msg) {
+            const el = document.getElementById('error-msg');
+            el.textContent = msg;
+            el.classList.add('visible');
+        }
+
+        function clearError() {
+            document.getElementById('error-msg').classList.remove('visible');
         }
 
         // draw circle centered on NYC
@@ -138,173 +168,139 @@
         }
 
         //interaction
-        document.getElementById('find-btn').addEventListener('click', () => {
 
-            const input = document.getElementById('origin-input').value;
+        document.getElementById('find-btn').addEventListener('click', runSearch);
+        document.getElementById('origin-input').addEventListener('keydown', e => {
+            if (e.key === 'Enter') runSearch();
+        });
+
+        function runSearch() {
+            const input = document.getElementById('origin-input').value.trim();
             if (!input) return;
+            clearError();
+            setLoading(true);
 
-            fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${input}.json?access_token=${mapboxgl.accessToken}`)
-            .then(res => res.json())
-            .then(data => {
+            if (!birdFeatures.length) {
+                showError("Bird data is still loading. Please try again.");
+                return;
+            }
 
-                if (!data.features.length) return;
+            fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(input)}.json?access_token=${mapboxgl.accessToken}`)
+                .then(res => res.json())
+                .then(data => {
+                    setLoading(false);
 
-                const userCoords = data.features[0].center;
-                const userPoint = turf.point(userCoords);
+                    if (!data.features || !data.features.length) {
+                        showError(`We couldn't find "${input}". Try adding a country or US/Canadian state e.g. "Peru" or "New York".`);
+                        return;
+                    }
 
-                // measure human distance to NYC
-                const humanLine = turf.greatCircle(
-                    userPoint,
-                    turf.point(NYC),
-                    { npoints: 200 }
-                );
+                    const userCoords = data.features[0].center;
 
-                const userDistance = turf.length(humanLine, { units: 'miles' });
-
-                const nearNYC = isNYCInput(input) || isClose(userDistance);
-
-                /* FIND CLOSEST BIRD */
-                let closestBird = null;
-                let closestBirdLine = null;
-                let displayInfo = "";
-
-                /*
-                
-                let inputLocation = input; // from input textbox above
-                let commonPoint = "none";
-                let drawDoubleLine = false;
-                let copy_to_use="";
-                */
-
-                if (nearNYC) {
-                    const nycBirdIndexes = [14, 24, 25, 31];
-                    const index = nycBirdIndexes[Math.floor(Math.random() * nycBirdIndexes.length)];
-                    closestBird = birdFeatures[index];
-
-                    // build a circle
-                    closestBirdLine = turf.greatCircle(
-                        turf.point(centralPark),
+                    // measure human distance to NYC
+                    const humanLine = turf.greatCircle(
+                        turf.point(userCoords),
                         turf.point(NYC),
                         { npoints: 200 }
                     );
-                    closestBird.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
 
-                    displayInfo = `You and some ${closestBird.properties.common_name}s both come from New York!`;
+                    const userDistance = turf.length(humanLine, { units: 'miles' });
 
-                    drawCircle(userCoords, userDistance, closestBirdLine);
-                } else {
-                    let smallestDiff = Infinity;
+                    const nearNYC = isNYCInput(input) || isTooClose(userDistance);
 
-                    // First: check for exact location match
-                    let exactMatch = birdFeatures.find(f => 
-                        input.toLowerCase() === String(f.properties.loc_direct).toLowerCase()
-                    );
+                    /* FIND CLOSEST BIRD */
+                    let closestBird, closestBirdLine, displayInfo;
 
-                    // find exact match first instead of iterating through every single bird
-                    if (exactMatch) {
-                        const latlongs = [exactMatch.properties.lng, exactMatch.properties.lat];
-                        closestBird = exactMatch;
-                        closestBirdLine = turf.greatCircle(
-                            turf.point(latlongs),
-                            turf.point(NYC),
-                            { npoints: 200 }
-                        );
-                        exactMatch.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
-                        displayInfo = `You and some ${exactMatch.properties.common_name}s both traveled to NYC from ${exactMatch.properties.loc_direct}!`;
-
-                    } else { // then if there isn't an exact match, then look by smallest distance difference
-                        birdFeatures.forEach(f => {
-                            const latlongs = [f.properties.lng, f.properties.lat];
-                            const diff = Math.abs(userDistance - f.properties.dist_total);
-                            if (diff < smallestDiff) {
-                                smallestDiff = diff;
-                                closestBird = f;
-                                closestBirdLine = turf.greatCircle(
-                                    turf.point(latlongs),
-                                    turf.point(NYC),
-                                    { npoints: 200 }
-                                );
-                                f.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
-                                displayInfo = `You traveled around ${(closestBird.properties.dist_total).toFixed(0)} miles to NYC, which is around as far as some ${f.properties.common_name}s fly from ${f.properties.loc_direct} to NYC.`;
-                            }
-                        });
-                    }
-
-                    /* OLD FOR EACH WAY
-                    birdFeatures.forEach(f => {
-                        const location = String(f.properties.loc_direct);
-                        const latlongs = [f.properties.lng, f.properties.lat];
-
-                        // Exact location match
-                        if (input.toLowerCase() === location.toLowerCase()) {
-                            closestBird = f;
-                            closestBirdLine = turf.greatCircle(
-                                turf.point(latlongs),
-                                turf.point(NYC),
-                                { npoints: 200 }
-                            );
-                            f.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
-                            displayInfo = `You and the ${f.properties.common_name} both traveled to NYC from ${location}!`;
-                            return;
-                        }
-
-                        // Distance-based match
-                        if (!closestBird || smallestDiff > 0) {
-                            const diff = Math.abs(userDistance - f.properties.dist_total);
-                            if (diff < smallestDiff) {
-                                smallestDiff = diff;
-                                closestBird = f;
-                                closestBirdLine = turf.greatCircle(
-                                    turf.point(latlongs),
-                                    turf.point(NYC),
-                                    { npoints: 200 }
-                                );
-                                f.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
-                                displayInfo = `You traveled ${userDistance.toFixed(0)} miles from ${input} to NYC, which is around as far as some ${f.properties.common_name} fly from ${f.properties.loc_direct} to NYC.`;
-                            }
-                        }
-                    });
+                    /*
+                    
+                    let inputLocation = input; // from input textbox above
+                    let commonPoint = "none";
+                    let drawDoubleLine = false;
+                    let copy_to_use="";
                     */
 
-                    drawLines(humanLine, closestBirdLine);
-                }
+                    if (nearNYC) {
+                        const nycIdxs = [14, 24, 25, 31];
+                        const idx = nycIdxs[Math.floor(Math.random() * nycIdxs.length)];
+                        closestBird = birdFeatures[idx];
+                        closestBirdLine = turf.greatCircle(turf.point(centralPark), turf.point(NYC), { npoints: 200 });
+                        closestBird.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
+                        displayInfo = `You and some ${closestBird.properties.common_name}s both stayed in New York!`;
+                        drawCircle(userCoords, userDistance, closestBirdLine);
+                    } else {
+                        let smallestDiff = Infinity;
 
-                showResult(userDistance, closestBird, displayInfo, closestBird.properties.copy);
+                        // First: check for exact location match
+                        const exactMatch = birdFeatures.find(f => 
+                            input.toLowerCase() === String(f.properties.loc_direct).toLowerCase()
+                        );
 
-                // On mobile, expand panel to show result
-                panel.classList.remove('collapsed');
-            });
-        });
+                        // find exact match first instead of iterating through every single bird
+                        if (exactMatch) {
+                            const ll = [exactMatch.properties.lng, exactMatch.properties.lat];
+                            closestBird = exactMatch;
+                            closestBirdLine = turf.greatCircle(turf.point(ll), turf.point(NYC), { npoints: 200 });
+                            exactMatch.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
+                            displayInfo = `You and some ${exactMatch.properties.common_name}s both traveled to NYC from ${exactMatch.properties.loc_direct}!`;
+                        } else { // then if there isn't an exact match, then look by smallest distance difference
+                            birdFeatures.forEach(f => {
+                                const ll   = [f.properties.lng, f.properties.lat];
+                                const diff = Math.abs(userDistance - f.properties.dist_total);
+                                if (diff < smallestDiff) {
+                                smallestDiff    = diff;
+                                closestBird     = f;
+                                closestBirdLine = turf.greatCircle(turf.point(ll), turf.point(NYC), { npoints: 200 });
+                                f.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
+                                displayInfo = `You traveled ${userDistance.toFixed(0)} mi from ${input} to NYC — about as far as the ${f.properties.common_name} flies from ${f.properties.loc_direct}.`;
+                                }
+                            });
+                        }
+
+                        drawLines(humanLine, closestBirdLine, userCoords);
+                    }
+
+                    if (!closestBird || !closestBirdLine) {
+                        setLoading(false);
+                        showError("We couldn't find a matching bird path.");
+                        return;
+                    }
+
+                    if (nearNYC) {
+                        drawCircle(userCoords, userDistance, closestBirdLine);
+                    } else {
+                        drawLines(humanLine, closestBirdLine, userCoords);
+                    }
+
+                    showResult(userDistance, closestBird, displayInfo);
+                    setLoading(false);
+
+                    // On mobile, expand panel to show result
+                    //panel.classList.remove('collapsed');
+                })
+                .catch((err) => {
+                    console.error('Search error:', err);
+                    setLoading(false);
+
+                    if (err instanceof TypeError) {
+                        showError("We hit a loading or connection problem. Please try again.");
+                    } else {
+                        showError("Something in the map logic failed. Check the console for details.");
+                    }
+                });
+        };
 
         // draw circle for near-nyc
         function drawCircle(userCoords, userDistanceMiles, birdLine) {
-            const radiusMiles = Math.max(userDistanceMiles, 8);
-            const circle = turf.circle(turf.point(NYC), radiusMiles, { units: 'miles', steps: 64 });
+            const circle = turf.circle(turf.point(NYC), Math.max(userDistanceMiles, 8), { units: 'miles', steps: 64 });
 
             // Update or create the single shared circle (always centered on NYC, just re-draws)
             if (!map.getSource('human-circle')) {
                 map.addSource('human-circle', { type: 'geojson', data: circle });
-                map.addLayer({
-                    id: 'human-circle',
-                    type: 'fill',
-                    source: 'human-circle',
-                    paint: {
-                        'fill-color': '#ab82c5',
-                        'fill-opacity': 0.15
-                    }
-                });
-                map.addLayer({
-                    id: 'human-circle-outline',
-                    type: 'line',
-                    source: 'human-circle',
-                    paint: {
-                        'line-color': '#ab82c5',
-                        'line-width': 2,
-                        'line-opacity': 0.9
-                    }
-                });
+                map.addLayer({ id: 'human-circle', type: 'fill', source: 'human-circle',
+                paint: { 'fill-color': '#ab82c5', 'fill-opacity': 0.15 } });
+                map.addLayer({ id: 'human-circle-outline', type: 'line', source: 'human-circle',
+                paint: { 'line-color': '#ab82c5', 'line-width': 2, 'line-opacity': 0.9 } });
             } else {
-                // Just update the radius, don't remove anything
                 map.getSource('human-circle').setData(circle);
             }
 
@@ -314,36 +310,19 @@
             birdLines.push(birdLine);
 
             if (!map.getSource('bird-paths')) {
-                map.addSource('bird-paths', {
-                    type: 'geojson',
-                    data: { type: 'FeatureCollection', features: birdLines }
-                });
-                map.addLayer({
-                    id: 'bird-paths',
-                    type: 'line',
-                    source: 'bird-paths',
-                    paint: {
-                        'line-color': '#ab82c5',
-                        'line-width': 2,
-                        'line-dasharray': [3, 2],
-                        'line-opacity': [
-                            'case',
-                            ['boolean', ['get', 'highlight'], false],
-                            1, 0.2
-                        ]
-                    }
-                });
+                map.addSource('bird-paths', { type: 'geojson', data: { type: 'FeatureCollection', features: birdLines } });
+                map.addLayer({ id: 'bird-paths', type: 'line', source: 'bird-paths',
+                paint: { 'line-color': '#ab82c5', 'line-width': 2, 'line-dasharray': [3,2],
+                    'line-opacity': ['case', ['boolean', ['get', 'highlight'], false], 1, 0.2] } });
             } else {
-                map.getSource('bird-paths').setData({
-                    type: 'FeatureCollection', features: birdLines
-                });
+                map.getSource('bird-paths').setData({ type: 'FeatureCollection', features: birdLines });
             }
 
             map.flyTo({ center: NYC, zoom: 9, speed: 0.8, curve: 1.4 });
         }
 
         // draw lines
-        function drawLines(humanLine, birdLine) {
+        function drawLines(humanLine, birdLine, userCoords) {
 
             // Dim previous lines
             humanLines.forEach(l => l.properties.highlight = false);
@@ -374,8 +353,18 @@
                     type: 'line',
                     source: 'human-paths',
                     paint: {
-                        'line-color': '#ab82c5',
-                        'line-width': 3,
+                        'line-color': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            '#EDCD3E',   // current line (yellow)
+                            '#ab82c5'    // previous lines (purple)
+                        ],
+                        'line-width': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            4,
+                            1.5
+                        ],
                         'line-opacity': [
                             'case',
                             ['boolean', ['get', 'highlight'], false],
@@ -406,14 +395,24 @@
                     type: 'line',
                     source: 'bird-paths',
                     paint: {
-                        'line-color': '#ab82c5',
-                        'line-width': 2,
+                        'line-color': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            '#EDCD3E',   // yellow accent for current color
+                            '#ab82c5'   
+                        ],
+                        'line-width': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            4,
+                            1.5
+                        ],
                         'line-dasharray': [3, 2],   // dotted!
                         'line-opacity': [
                             'case',
                             ['boolean', ['get', 'highlight'], false],
                             1,
-                            0.2
+                            0.25
                         ]
                     }
                 });
@@ -426,30 +425,55 @@
             }
 
             map.flyTo({
-                center: humanLine.geometry.coordinates[0],
+                center: userCoords,
                 zoom: 3,
                 speed: 0.8,
                 curve: 1.4
             });
         }
 
-        // panel
-        function showResult(userDistance, birdLine, displayInfo,copy_to_use) {
-            //showResult(userDistance, closestBird, displayInfo, closestBird.properties.copy);
-            const panel = document.getElementById('result');
-            console.log(birdLine.properties.img_link);
-            panel.innerHTML = `
-                <h3>${birdLine.properties.common_name}</h3>
-                <p> ${displayInfo} </p>
-                <p><strong>Both you and your companion bird traveled around </strong>  ${parseInt(birdLine.properties.dist_total).toFixed(0)} miles on your journey here to NYC!</p>
-                <img src="${birdLine.properties.img_link}" alt="A ${birdLine.properties.common_name}" style="width: 200px; height: auto;">
-                <p>${birdLine.properties.copy}</p>
-                <a href="${birdLine.properties.ebird_link}" class="learn-btn" target="_blank">
-                    Learn more about <br>${birdLine.properties.common_name}s
-                </a>
-            `;
+        function syncPanelState() {
+            if (window.innerWidth <= 640) {
+                if (!panel.classList.contains('has-result')) {
+                    panel.classList.add('collapsed');
+                }
+            } else {
+                panel.classList.remove('collapsed');
+            }
         }
 
+        window.addEventListener('resize', syncPanelState);
+        syncPanelState();
+
+        // panel
+        function showResult(userDistance, bird, displayInfo) {
+            const el = document.getElementById('result');
+
+            el.innerHTML = `
+                <h3>${bird.properties.common_name}</h3>
+                <p>${displayInfo}</p>
+                <p>
+                    Both you and your companion bird traveled around
+                    ${parseInt(bird.properties.dist_total).toFixed(0)} miles on your journey here to NYC!
+                </p>
+                <img
+                    src="${bird.properties.img_link}"
+                    alt="A ${bird.properties.common_name}"
+                >
+                <p>${bird.properties.copy}</p>
+                <a href="${bird.properties.ebird_link}" class="learn-btn" target="_blank">
+                    Learn more about <br>${bird.properties.common_name}s
+                </a>
+            `;
+
+            el.classList.add('visible');
+
+            if (isMobile()) {
+                panel.classList.remove('collapsed');
+                panel.classList.add('has-result');
+                setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 420);            
+            }
+        }
     </script>
 
 </body>

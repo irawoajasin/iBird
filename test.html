@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>I Bird NYU</title>
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --purple: #ab82c5;
+      --purple-dim: rgba(171,130,197,0.18);
+      --bg: #0b1320;
+      --panel-bg: rgba(11, 16, 28, 0.97);
+      --text: #e8e0f0;
+      --text-dim: #7a7090;
+      --error: #e07070;
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      font-family: 'DM Sans', sans-serif;
+      color: var(--text);
+      overflow: hidden;
+      height: 100dvh;
+    }
+
+    #map {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ═══════════════════════════════════
+       DESKTOP — side panel
+    ═══════════════════════════════════ */
+    #ui-panel {
+      position: fixed;
+      top: 24px;
+      left: 24px;
+      width: 320px;
+      max-height: calc(100dvh - 48px);
+      overflow-y: auto;
+      scrollbar-width: none;
+      background: var(--panel-bg);
+      border: 1px solid rgba(171,130,197,0.15);
+      border-radius: var(--radius);
+      padding: 24px 20px;
+      z-index: 20;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+    }
+    #ui-panel::-webkit-scrollbar { display: none; }
+
+    #panel-handle { display: none; }
+    #panel-inner { display: contents; }
+
+    .panel-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1.2;
+      margin-bottom: 10px;
+      color: #fff;
+    }
+
+    .panel-intro {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-dim);
+      margin-bottom: 18px;
+    }
+
+    #origin-input {
+      width: 100%;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(171,130,197,0.3);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      margin-bottom: 10px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #origin-input:focus { border-color: var(--purple); }
+    #origin-input::placeholder { color: var(--text-dim); }
+
+    #find-btn {
+      width: 100%;
+      padding: 11px;
+      background: var(--purple);
+      border: none;
+      border-radius: 8px;
+      color: #0b1320;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      position: relative;
+    }
+    #find-btn:hover { opacity: 0.88; }
+    #find-btn:active { transform: scale(0.98); }
+    #find-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #find-btn .btn-label { transition: opacity 0.15s; }
+    #find-btn.loading .btn-label { opacity: 0; }
+    #find-btn .spinner {
+      display: none;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 18px; height: 18px;
+      border: 2px solid rgba(11,19,32,0.3);
+      border-top-color: #0b1320;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    #find-btn.loading .spinner { display: block; }
+    @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+    #error-msg {
+      display: none;
+      margin-top: 10px;
+      padding: 9px 12px;
+      background: rgba(224,112,112,0.12);
+      border: 1px solid rgba(224,112,112,0.3);
+      border-radius: 8px;
+      color: var(--error);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    #error-msg.visible { display: block; }
+
+    #result {
+      margin-top: 18px;
+      display: none;
+      animation: fadeUp 0.35s ease forwards;
+    }
+    #result.visible { display: block; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    #result img {
+      width: 100%;
+      height: 140px;
+      object-fit: cover;
+      border-radius: 10px;
+      margin-bottom: 12px;
+    }
+
+    .result-bird-name {
+      font-family: 'Playfair Display', serif;
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #fff;
+    }
+
+    .result-tagline {
+      font-size: 13px;
+      color: var(--purple);
+      margin-bottom: 10px;
+      line-height: 1.4;
+    }
+
+    .result-stats {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .stat-pill {
+      flex: 1;
+      padding: 8px 10px;
+      background: rgba(171,130,197,0.1);
+      border: 1px solid rgba(171,130,197,0.2);
+      border-radius: 8px;
+      text-align: center;
+    }
+    .stat-pill .stat-num {
+      font-family: 'Playfair Display', serif;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--purple);
+      display: block;
+    }
+    .stat-pill .stat-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .result-copy {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-dim);
+      margin-bottom: 14px;
+    }
+
+    .learn-btn {
+      display: block;
+      text-align: center;
+      width: 100%;
+      padding: 10px;
+      background: var(--purple);
+      color: #0b1320;
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: 'DM Sans', sans-serif;
+      font-style: italic;
+      transition: opacity 0.2s;
+    }
+    .learn-btn:hover { opacity: 0.85; }
+
+    /* ═══════════════════════════════════
+       MOBILE — bottom drawer
+    ═══════════════════════════════════ */
+    @media (max-width: 640px) {
+      #ui-panel {
+        position: fixed;
+        top: auto;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        max-width: 100%;
+        max-height: 78dvh;
+        border-radius: 20px 20px 0 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        border-top: 1px solid rgba(171,130,197,0.2);
+        padding: 0 0 env(safe-area-inset-bottom, 16px);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        transition: max-height 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+
+      #ui-panel.collapsed {
+        max-height: 70px;
+      }
+
+      #ui-panel.has-result {
+        max-height: 85dvh;
+      }
+
+      #panel-handle {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 10px 20px 8px;
+        cursor: pointer;
+        gap: 7px;
+        flex-shrink: 0;
+      }
+
+      .handle-bar {
+        width: 36px;
+        height: 4px;
+        background: rgba(171,130,197,0.3);
+        border-radius: 2px;
+      }
+
+      .handle-row {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .handle-title {
+        font-family: 'Playfair Display', serif;
+        font-size: 15px;
+        color: #fff;
+      }
+
+      .handle-chevron {
+        font-size: 18px;
+        color: var(--purple);
+        transition: transform 0.3s;
+        line-height: 1;
+      }
+
+      #ui-panel.collapsed .handle-chevron {
+        transform: rotate(180deg);
+      }
+
+      /* Scrollable inner on mobile */
+      #panel-inner {
+        display: block;
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px 20px 16px;
+        scrollbar-width: none;
+      }
+      #panel-inner::-webkit-scrollbar { display: none; }
+
+      .panel-title { font-size: 20px; margin-bottom: 6px; }
+
+      .panel-intro {
+        font-size: 12px;
+        margin-bottom: 14px;
+        color: var(--text-dim);
+      }
+
+      #origin-input {
+        font-size: 16px; /* prevents iOS zoom on focus */
+        padding: 14px;
+        margin-bottom: 12px;
+        border-radius: 10px;
+      }
+
+      #find-btn {
+        padding: 15px;
+        font-size: 16px;
+        border-radius: 10px;
+      }
+
+      #result img { height: 180px; }
+      .result-bird-name { font-size: 22px; }
+      .stat-pill .stat-num { font-size: 18px; }
+
+      .learn-btn {
+        padding: 14px;
+        font-size: 15px;
+        border-radius: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="ui-panel">
+
+    <!-- Mobile-only handle bar -->
+    <div id="panel-handle">
+      <div class="handle-bar"></div>
+      <div class="handle-row">
+        <span class="handle-title">I Bird NYU</span>
+        <span class="handle-chevron">˅</span>
+      </div>
+    </div>
+
+    <!-- Inner scrollable content -->
+    <div id="panel-inner">
+      <h1 class="panel-title">I Bird NYU</h1>
+      <p class="panel-intro">
+        These birds travel, and you did too. Enter where you came from and discover which bird made the same journey to New York.
+      </p>
+
+      <input id="origin-input" type="text" placeholder="Where are you traveling from?" autocomplete="off" />
+      <button id="find-btn">
+        <span class="btn-label">Compare Migration</span>
+        <div class="spinner"></div>
+      </button>
+
+      <div id="error-msg"></div>
+      <div id="result"></div>
+    </div>
+
+  </div>
+
+  <script>
+    mapboxgl.accessToken = 'pk.eyJ1IjoiemFyeWFqYXNpbiIsImEiOiJjbG9qbGNhYjMwaWdpMnFtaWMzNTM3Zzl4In0.aeODfKu-L03BARdLrvOZAA';
+
+    const NYC = [-74.0060, 40.7128];
+    const centralPark = [-73.96777, 40.78165];
+    const CIRCLE_THRESHOLD_MILES = 50;
+
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/dark-v11',
+      center: [-40, 30],
+      zoom: 1.5
+    });
+
+    let birdFeatures = [];
+    let humanLines  = [];
+    let birdLines   = [];
+
+    const isMobile = () => window.innerWidth <= 640;
+
+    // ── Mobile drawer ────────────────────────────────────
+    const panel = document.getElementById('ui-panel');
+    document.getElementById('panel-handle').addEventListener('click', () => {
+      panel.classList.toggle('collapsed');
+    });
+    if (isMobile()) panel.classList.add('collapsed');
+
+    // ── Load CSV ─────────────────────────────────────────
+    map.on('load', () => {
+      fetch('jack_birds_cleaned.csv')
+        .then(res => res.text())
+        .then(csvText => {
+          const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+          birdFeatures = parsed.data.map(row => {
+            const common_name = row['Common-Name'].trim();
+            const loc_direct  = row['Location-Direct'].trim();
+            const lat         = parseFloat(row['Lat']);
+            const lng         = parseFloat(row['Lng']);
+            const dist_total  = parseFloat(row['Distance-to-NYC']);
+            const copy        = row['Copy-Direct'].trim();
+            const ebird_link  = row['Ebird-Link'].trim();
+            const img_link    = row['Image-Link'].trim();
+            if (isNaN(lat) || isNaN(lng)) return null;
+            const line = turf.greatCircle(turf.point([lng, lat]), turf.point(NYC), { npoints: 200 });
+            line.properties = { distance: turf.length(line, { units: 'miles' }), common_name, lat, lng, loc_direct, dist_total, ebird_link, copy, img_link };
+            return line;
+          }).filter(Boolean);
+          console.log("Birds loaded:", birdFeatures.length);
+        });
+    });
+
+    // ── Helpers ──────────────────────────────────────────
+    const NYC_ALIASES = ['nyc','new york city','new york','ny','manhattan','brooklyn','queens','bronx','staten island','new york, ny'];
+    const isNYCInput  = s => NYC_ALIASES.includes(s.toLowerCase().trim());
+    const isTooClose  = m => m < CIRCLE_THRESHOLD_MILES;
+
+    function setLoading(on) {
+      const btn = document.getElementById('find-btn');
+      btn.disabled = on;
+      btn.classList.toggle('loading', on);
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg;
+      el.classList.add('visible');
+    }
+
+    function clearError() {
+      document.getElementById('error-msg').classList.remove('visible');
+    }
+
+    // ── Button click ─────────────────────────────────────
+    document.getElementById('find-btn').addEventListener('click', runSearch);
+    document.getElementById('origin-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') runSearch();
+    });
+
+    function runSearch() {
+      const input = document.getElementById('origin-input').value.trim();
+      if (!input) return;
+
+      clearError();
+      setLoading(true);
+
+      fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(input)}.json?access_token=${mapboxgl.accessToken}`)
+        .then(res => res.json())
+        .then(data => {
+          setLoading(false);
+
+          if (!data.features || !data.features.length) {
+            showError(`We couldn't find "${input}". Try adding a country — e.g. "Lima, Peru" or "Cork, Ireland".`);
+            return;
+          }
+
+          const userCoords   = data.features[0].center;
+          const humanLine    = turf.greatCircle(turf.point(userCoords), turf.point(NYC), { npoints: 200 });
+          const userDistance = turf.length(humanLine, { units: 'miles' });
+          const nearNYC      = isNYCInput(input) || isTooClose(userDistance);
+
+          let closestBird, closestBirdLine, displayInfo;
+
+          if (nearNYC) {
+            const nycIdxs = [14, 24, 25, 31];
+            const idx = nycIdxs[Math.floor(Math.random() * nycIdxs.length)];
+            closestBird = birdFeatures[idx];
+            closestBirdLine = turf.greatCircle(turf.point(centralPark), turf.point(NYC), { npoints: 200 });
+            closestBird.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
+            displayInfo = `You and the ${closestBird.properties.common_name} both stayed in New York!`;
+            drawCircle(userCoords, userDistance, closestBirdLine);
+
+          } else {
+            let smallestDiff = Infinity;
+            const exactMatch = birdFeatures.find(f =>
+              input.toLowerCase() === String(f.properties.loc_direct).toLowerCase()
+            );
+
+            if (exactMatch) {
+              const ll = [exactMatch.properties.lng, exactMatch.properties.lat];
+              closestBird = exactMatch;
+              closestBirdLine = turf.greatCircle(turf.point(ll), turf.point(NYC), { npoints: 200 });
+              exactMatch.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
+              displayInfo = `You and the ${exactMatch.properties.common_name} both traveled to NYC from ${exactMatch.properties.loc_direct}!`;
+            } else {
+              birdFeatures.forEach(f => {
+                const ll   = [f.properties.lng, f.properties.lat];
+                const diff = Math.abs(userDistance - f.properties.dist_total);
+                if (diff < smallestDiff) {
+                  smallestDiff    = diff;
+                  closestBird     = f;
+                  closestBirdLine = turf.greatCircle(turf.point(ll), turf.point(NYC), { npoints: 200 });
+                  f.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
+                  displayInfo = `You traveled ${userDistance.toFixed(0)} mi from ${input} to NYC — about as far as the ${f.properties.common_name} flies from ${f.properties.loc_direct}.`;
+                }
+              });
+            }
+            drawLines(humanLine, closestBirdLine);
+          }
+
+          showResult(userDistance, closestBird, displayInfo);
+        })
+        .catch(() => {
+          setLoading(false);
+          showError("Something went wrong. Check your connection and try again.");
+        });
+    }
+
+    // ── Draw circle ──────────────────────────────────────
+    function drawCircle(userCoords, userDistanceMiles, birdLine) {
+      const circle = turf.circle(turf.point(NYC), Math.max(userDistanceMiles, 8), { units: 'miles', steps: 64 });
+
+      if (!map.getSource('human-circle')) {
+        map.addSource('human-circle', { type: 'geojson', data: circle });
+        map.addLayer({ id: 'human-circle', type: 'fill', source: 'human-circle',
+          paint: { 'fill-color': '#ab82c5', 'fill-opacity': 0.15 } });
+        map.addLayer({ id: 'human-circle-outline', type: 'line', source: 'human-circle',
+          paint: { 'line-color': '#ab82c5', 'line-width': 2, 'line-opacity': 0.9 } });
+      } else {
+        map.getSource('human-circle').setData(circle);
+      }
+
+      birdLine.properties.highlight = true;
+      birdLines.forEach(l => l.properties.highlight = false);
+      birdLines.push(birdLine);
+
+      if (!map.getSource('bird-paths')) {
+        map.addSource('bird-paths', { type: 'geojson', data: { type: 'FeatureCollection', features: birdLines } });
+        map.addLayer({ id: 'bird-paths', type: 'line', source: 'bird-paths',
+          paint: { 'line-color': '#ab82c5', 'line-width': 2, 'line-dasharray': [3,2],
+            'line-opacity': ['case', ['boolean', ['get', 'highlight'], false], 1, 0.2] } });
+      } else {
+        map.getSource('bird-paths').setData({ type: 'FeatureCollection', features: birdLines });
+      }
+
+      map.flyTo({ center: NYC, zoom: 9, speed: 0.8, curve: 1.4 });
+    }
+
+    // ── Draw lines ───────────────────────────────────────
+    function drawLines(humanLine, birdLine) {
+      humanLine.properties = { highlight: true };
+      birdLine.properties.highlight = true;
+      humanLines.forEach(l => l.properties.highlight = false);
+      birdLines.forEach(l => l.properties.highlight = false);
+      humanLines.push(humanLine);
+      birdLines.push(birdLine);
+
+      if (!map.getSource('human-paths')) {
+        map.addSource('human-paths', { type: 'geojson', data: { type: 'FeatureCollection', features: humanLines } });
+        map.addLayer({ id: 'human-paths', type: 'line', source: 'human-paths',
+          paint: { 'line-color': '#ab82c5', 'line-width': 3,
+            'line-opacity': ['case', ['boolean', ['get', 'highlight'], false], 1, 0.25] } });
+      } else {
+        map.getSource('human-paths').setData({ type: 'FeatureCollection', features: humanLines });
+      }
+
+      if (!map.getSource('bird-paths')) {
+        map.addSource('bird-paths', { type: 'geojson', data: { type: 'FeatureCollection', features: birdLines } });
+        map.addLayer({ id: 'bird-paths', type: 'line', source: 'bird-paths',
+          paint: { 'line-color': '#ab82c5', 'line-width': 2, 'line-dasharray': [3,2],
+            'line-opacity': ['case', ['boolean', ['get', 'highlight'], false], 1, 0.2] } });
+      } else {
+        map.getSource('bird-paths').setData({ type: 'FeatureCollection', features: birdLines });
+        map.getSource('human-paths').setData({ type: 'FeatureCollection', features: humanLines });
+      }
+
+      map.flyTo({ center: humanLine.geometry.coordinates[0], zoom: 3, speed: 0.8, curve: 1.4 });
+    }
+
+    // ── Result card ──────────────────────────────────────
+    function showResult(userDistance, bird, displayInfo) {
+      const el = document.getElementById('result');
+      el.innerHTML = `
+        <img src="${bird.properties.img_link}" alt="${bird.properties.common_name}">
+        <div class="result-bird-name">${bird.properties.common_name}</div>
+        <div class="result-tagline">${displayInfo}</div>
+        <div class="result-stats">
+          <div class="stat-pill">
+            <span class="stat-num">${userDistance.toFixed(0)}</span>
+            <span class="stat-label">Your miles</span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-num">${bird.properties.distance.toFixed(0)}</span>
+            <span class="stat-label">Bird miles</span>
+          </div>
+        </div>
+        <p class="result-copy">${bird.properties.copy}</p>
+        <a href="${bird.properties.ebird_link}" class="learn-btn" target="_blank">${bird.properties.common_name}</a>
+      `;
+      el.classList.add('visible');
+
+      if (isMobile()) {
+        panel.classList.remove('collapsed');
+        panel.classList.add('has-result');
+        setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 420);
+      }
+    }
+  </script>
+</body>
+</html>
