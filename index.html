@@ -26,7 +26,7 @@
         </div>
 
         <h1>Welcome to the I Bird NYU Map</h1>
-        <p>These birds travel, and you did too! Type in where you came from and see what bird traveled the same distance as you.</p>
+        <p>These birds travel, and you did too! Type in the country or US/Canadian state where you came from and see what bird traveled a similar distance as you.</p>
         <input id="origin-input" type="text" placeholder="Where are you traveling from?"/>
         <button id="find-btn">Compare Migration</button>
         <div id="result"></div>
@@ -88,7 +88,7 @@
                     const img_link = row['Image-Link'].trim();
 
                     if (isNaN(lat) || isNaN(lng)) return null;
-
+                    console.log("DIST "+dist_total);
                     const line = turf.greatCircle(
                         turf.point([lng, lat]),
                         turf.point(NYC),
@@ -189,7 +189,7 @@
                     );
                     closestBird.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
 
-                    displayInfo = `You and the ${closestBird.properties.common_name} both come from New York!`;
+                    displayInfo = `You and some ${closestBird.properties.common_name}s both come from New York!`;
 
                     drawCircle(userCoords, userDistance, closestBirdLine);
                 } else {
@@ -210,7 +210,7 @@
                             { npoints: 200 }
                         );
                         exactMatch.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
-                        displayInfo = `You and the ${exactMatch.properties.common_name} both traveled to NYC from ${exactMatch.properties.loc_direct}!`;
+                        displayInfo = `You and some ${exactMatch.properties.common_name}s both traveled to NYC from ${exactMatch.properties.loc_direct}!`;
 
                     } else { // then if there isn't an exact match, then look by smallest distance difference
                         birdFeatures.forEach(f => {
@@ -225,7 +225,7 @@
                                     { npoints: 200 }
                                 );
                                 f.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
-                                displayInfo = `You traveled ${userDistance.toFixed(0)} miles from ${input} to NYC, which is around as far as some ${f.properties.common_name} fly from ${f.properties.loc_direct} to NYC.`;
+                                displayInfo = `You traveled around ${(closestBird.properties.dist_total).toFixed(0)} miles to NYC, which is around as far as some ${f.properties.common_name}s fly from ${f.properties.loc_direct} to NYC.`;
                             }
                         });
                     }
@@ -435,17 +435,17 @@
 
         // panel
         function showResult(userDistance, birdLine, displayInfo,copy_to_use) {
+            //showResult(userDistance, closestBird, displayInfo, closestBird.properties.copy);
             const panel = document.getElementById('result');
             console.log(birdLine.properties.img_link);
             panel.innerHTML = `
                 <h3>${birdLine.properties.common_name}</h3>
                 <p> ${displayInfo} </p>
-                <p><strong>You traveled:</strong> ${userDistance.toFixed(0)} miles</p>
-                <p><strong>Your companion bird traveled:</strong> ${birdLine.properties.distance.toFixed(0)} miles</p>
+                <p><strong>Both you and your companion bird traveled around </strong>  ${parseInt(birdLine.properties.dist_total).toFixed(0)} miles on your journey here to NYC!</p>
                 <img src="${birdLine.properties.img_link}" alt="A ${birdLine.properties.common_name}" style="width: 200px; height: auto;">
                 <p>${birdLine.properties.copy}</p>
                 <a href="${birdLine.properties.ebird_link}" class="learn-btn" target="_blank">
-                    Learn more about the <br>${birdLine.properties.common_name}
+                    Learn more about <br>${birdLine.properties.common_name}s
                 </a>
             `;
         }
