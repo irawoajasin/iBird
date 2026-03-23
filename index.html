@@ -189,7 +189,7 @@
                     );
                     closestBird.properties.distance = turf.length(closestBirdLine, { units: 'miles' });
 
-                    displayInfo = `You and the ${closestBird.properties.common_name} both come from New York!`;
+                    displayInfo = `You and some ${closestBird.properties.common_name}s both come from New York!`;
 
                     drawCircle(userCoords, userDistance, closestBirdLine);
                 } else {
@@ -441,11 +441,11 @@
                 <h3>${birdLine.properties.common_name}</h3>
                 <p> ${displayInfo} </p>
                 <p><strong>You traveled:</strong> ${userDistance.toFixed(0)} miles</p>
-                <p><strong>Your companion bird traveled:</strong> ${birdLine.properties.distance.toFixed(0)} miles</p>
+                <p><strong>Your companion bird traveled:</strong> ${birdLine.properties.total_dist.toFixed(0)} miles</p>
                 <img src="${birdLine.properties.img_link}" alt="A ${birdLine.properties.common_name}" style="width: 200px; height: auto;">
                 <p>${birdLine.properties.copy}</p>
                 <a href="${birdLine.properties.ebird_link}" class="learn-btn" target="_blank">
-                    Learn more about the <br>${birdLine.properties.common_name}
+                    Learn more about <br>${birdLine.properties.common_name}s
                 </a>
             `;
         }
