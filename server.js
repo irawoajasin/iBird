@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS lines (
   screen_width INTEGER,
   screen_height INTEGER,
   user_agent TEXT,
-  feature_geojson TEXT
+  feature_geojson TEXT,
+  bird_feature_geojson TEXT
 );
 `);
 
@@ -64,7 +65,8 @@ app.post("/lines", async (req, res) => {
       durationMs,
       lineCountThisSession,
       analytics,
-      featureGeoJSON
+      featureGeoJSON,
+      birdFeatureGeoJSON
     } = req.body;
 
     await db.run(
@@ -81,8 +83,9 @@ app.post("/lines", async (req, res) => {
         screen_width,
         screen_height,
         user_agent,
-        feature_geojson
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        feature_geojson,
+        bird_feature_geojson
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         createdAt || new Date().toISOString(),
         sessionId || null,
@@ -96,7 +99,8 @@ app.post("/lines", async (req, res) => {
         analytics?.screenWidth ?? null,
         analytics?.screenHeight ?? null,
         analytics?.userAgent || null,
-        JSON.stringify(featureGeoJSON || null)
+        JSON.stringify(featureGeoJSON || null),
+        JSON.stringify(birdFeatureGeoJSON || null)
       ]
     );
 

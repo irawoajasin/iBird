@@ -67,7 +67,7 @@
         let birdLines = [];
 
         const SERVER_URL = "http://localhost:3000";
-        const MAX_VISIBLE_LINES = 50;
+        const MAX_VISIBLE_LINES = 25;
 
         let sessionId = localStorage.getItem("ibird-session-id");
         if (!sessionId) {
@@ -85,14 +85,14 @@
             return "desktop";
         }
 
-        async function saveInteraction({ geometryType, geojson, origin, userDistanceMiles }) {
+        async function saveInteraction({ geometryType, geojson, birdGeojson, origin, userDistanceMiles }) {
             lineCountThisSession += 1;
 
             const payload = {
                 createdAt: new Date().toISOString(),
                 sessionId,
                 origin,
-                geometryType,              // "line" or "circle"
+                geometryType,
                 userDistanceMiles,
                 durationMs: Date.now() - sessionStart,
                 lineCountThisSession,
@@ -103,15 +103,18 @@
                     screenHeight: window.innerHeight,
                     userAgent: navigator.userAgent
                 },
-                featureGeoJSON: geojson
+                featureGeoJSON: geojson,
+                birdFeatureGeoJSON: birdGeojson
             };
 
             try {
-                await fetch(`${SERVER_URL}/lines`, {
+                const res = await fetch(`${SERVER_URL}/lines`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload)
                 });
+
+                console.log("POST /lines status =", res.status);
             } catch (err) {
                 console.error("Failed to save interaction:", err);
             }
@@ -141,24 +144,34 @@
                 const rows = await res.json();
 
                 rows.reverse().forEach(row => {
-                    const rawFeature = row.feature_geojson || row.featureGeoJSON;
-                    const feature = typeof rawFeature === "string"
-                        ? JSON.parse(rawFeature)
-                        : rawFeature;
+                    const rawHuman = row.feature_geojson || row.featureGeoJSON;
+                    const rawBird = row.bird_feature_geojson || row.birdFeatureGeoJSON;
+
+                    const humanFeature = typeof rawHuman === "string" ? JSON.parse(rawHuman) : rawHuman;
+                    const birdFeature = typeof rawBird === "string" ? JSON.parse(rawBird) : rawBird;
 
                     const geometryType = row.geometry_type || row.geometryType;
 
-                    if (!feature) return;
+                    if (humanFeature) {
+                        humanFeature.properties = {
+                            ...(humanFeature.properties || {}),
+                            highlight: false
+                        };
 
-                    feature.properties = {
-                        ...(feature.properties || {}),
-                        highlight: false
-                    };
+                        if (geometryType === "circle") {
+                            humanCircles.push(humanFeature);
+                        } else {
+                            humanLines.push(humanFeature);
+                        }
+                    }
 
-                    if (geometryType === "circle") {
-                        humanCircles.push(feature);
-                    } else {
-                        humanLines.push(feature);
+                    if (birdFeature) {
+                        birdFeature.properties = {
+                            ...(birdFeature.properties || {}),
+                            highlight: false
+                        };
+
+                        birdLines.push(birdFeature);
                     }
                 });
 
@@ -510,6 +523,7 @@
             saveInteraction({
                 geometryType: "circle",
                 geojson: circle,
+                birdGeojson: birdLine,
                 origin: originText,
                 userDistanceMiles
             });
@@ -637,6 +651,7 @@
             saveInteraction({
                 geometryType: "line",
                 geojson: humanLine,
+                birdGeojson: birdLine,
                 origin: originText,
                 userDistanceMiles: userDistance
             });
