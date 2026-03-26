@@ -66,6 +66,57 @@
         let humanCircles = [];
         let birdLines = [];
 
+        const SERVER_URL = "http://localhost:3000";
+        const MAX_VISIBLE_LINES = 50;
+
+        let sessionId = localStorage.getItem("ibird-session-id");
+        if (!sessionId) {
+            sessionId = crypto.randomUUID();
+            localStorage.setItem("ibird-session-id", sessionId);
+        }
+
+        const sessionStart = Date.now();
+        let lineCountThisSession = 0;
+
+        function getDeviceCategory() {
+            const w = window.innerWidth;
+            if (w <= 640) return "mobile";
+            if (w <= 1024) return "tablet";
+            return "desktop";
+        }
+
+        async function saveInteraction({ geometryType, geojson, origin, userDistanceMiles }) {
+            lineCountThisSession += 1;
+
+            const payload = {
+                createdAt: new Date().toISOString(),
+                sessionId,
+                origin,
+                geometryType,              // "line" or "circle"
+                userDistanceMiles,
+                durationMs: Date.now() - sessionStart,
+                lineCountThisSession,
+                analytics: {
+                    deviceCategory: getDeviceCategory(),
+                    referrer: document.referrer || null,
+                    screenWidth: window.innerWidth,
+                    screenHeight: window.innerHeight,
+                    userAgent: navigator.userAgent
+                },
+                featureGeoJSON: geojson
+            };
+
+            try {
+                await fetch(`${SERVER_URL}/lines`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+            } catch (err) {
+                console.error("Failed to save interaction:", err);
+            }
+        }
+
         const isMobile = () => window.innerWidth <= 640;
 
         // mobile panel toggle
@@ -83,12 +134,40 @@
         }
 
         // load bird data
-        map.on('load', () => {
+        map.on('load', async () => {
 
-            // load the CSV of bird info
-            // fetch('jack_birds_cleaned.csv')
-            // .then(res => res.text())
-            // .then(csvText => {
+            try {
+                const res = await fetch(`${SERVER_URL}/lines?limit=${MAX_VISIBLE_LINES}`);
+                const rows = await res.json();
+
+                rows.reverse().forEach(row => {
+                    const rawFeature = row.feature_geojson || row.featureGeoJSON;
+                    const feature = typeof rawFeature === "string"
+                        ? JSON.parse(rawFeature)
+                        : rawFeature;
+
+                    const geometryType = row.geometry_type || row.geometryType;
+
+                    if (!feature) return;
+
+                    feature.properties = {
+                        ...(feature.properties || {}),
+                        highlight: false
+                    };
+
+                    if (geometryType === "circle") {
+                        humanCircles.push(feature);
+                    } else {
+                        humanLines.push(feature);
+                    }
+                });
+
+                trimVisibleFeatures();
+                refreshAllSources();
+            } catch (err) {
+                console.error("Could not load saved lines:", err);
+            }
+
             fetch('jack_birds_cleaned.csv')
             .then(res => res.text())
             .then(csvText => {
@@ -134,6 +213,7 @@
                 }).filter(f => f !== null);
 
                 console.log("Birds loaded:", birdFeatures.length);
+                refreshAllSources(); //draw any server-loaded human lines/circles now that map is ready
             });
         });
 
@@ -145,6 +225,12 @@
 
         const isNYCInput  = s => NYC_ALIASES.includes(s.toLowerCase().trim());
         const isTooClose  = m => m < CIRCLE_THRESHOLD_MILES;
+
+        function trimVisibleFeatures() {
+            while (humanLines.length > MAX_VISIBLE_LINES) humanLines.shift();
+            while (birdLines.length > MAX_VISIBLE_LINES) birdLines.shift();
+            while (humanCircles.length > MAX_VISIBLE_LINES) humanCircles.shift();
+        }
 
         function setLoading(on) {
             const btn = document.getElementById('find-btn');
@@ -265,9 +351,9 @@
                     }
 
                     if (nearNYC) {
-                        drawCircle(userCoords, userDistance, closestBirdLine);
+                        drawCircle(userCoords, userDistance, closestBirdLine, input);
                     } else {
-                        drawLines(humanLine, closestBirdLine, userCoords);
+                        drawLines(humanLine, closestBirdLine, userCoords, input, userDistance);
                     }
 
                     showResult(userDistance, closestBird, displayInfo);
@@ -289,7 +375,7 @@
         };
 
         // draw circle for near-nyc
-        function drawCircle(userCoords, userDistanceMiles, birdLine) {
+        function drawCircle(userCoords, userDistanceMiles, birdLine, originText) {
             const circle = turf.circle(
                 turf.point(NYC),
                 Math.max(userDistanceMiles, 8),
@@ -298,7 +384,6 @@
 
             // dim previous circles
             clearAllHighlights();
-            refreshAllSources();
 
             // highlight current circle
             circle.properties = {
@@ -311,12 +396,11 @@
                 highlight: true
             };
 
-            // optional cap
-            const MAX_LINES = 100;
-            if (humanCircles.length >= MAX_LINES) humanCircles.shift();
-
             humanCircles.push(circle);
             birdLines.push(birdLine);
+
+            trimVisibleFeatures();
+            refreshAllSources();
 
             if (!map.getSource('human-circles')) {
                 map.addSource('human-circles', {
@@ -379,7 +463,7 @@
                 });
             }
 
-            if (birdLines.length >= MAX_LINES) birdLines.shift();
+            if (birdLines.length >= MAX_VISIBLE_LINES) birdLines.shift();
 
             if (!map.getSource('bird-paths')) {
                 map.addSource('bird-paths', {
@@ -423,6 +507,13 @@
                 });
             }
 
+            saveInteraction({
+                geometryType: "circle",
+                geojson: circle,
+                origin: originText,
+                userDistanceMiles
+            });
+
             map.flyTo({
                 center: NYC,
                 zoom: 9,
@@ -432,11 +523,10 @@
         }
 
         // draw lines
-        function drawLines(humanLine, birdLine, userCoords) {
+        function drawLines(humanLine, birdLine, userCoords, originText, userDistance) {
 
             // Dim previous lines
             clearAllHighlights();
-            refreshAllSources();
 
             // Add highlight to newest ones
             humanLine.properties = {
@@ -454,6 +544,9 @@
 
             humanLines.push(humanLine);
             birdLines.push(birdLine);
+
+            trimVisibleFeatures();
+            refreshAllSources();
 
             // If sources don't exist yet, create them
             if (!map.getSource('human-paths')) {
@@ -541,6 +634,13 @@
                 });
             }
 
+            saveInteraction({
+                geometryType: "line",
+                geojson: humanLine,
+                origin: originText,
+                userDistanceMiles: userDistance
+            });
+
             map.flyTo({
                 center: userCoords,
                 zoom: 3,
@@ -593,21 +693,147 @@
         }
 
         function refreshAllSources() {
-            if (map.getSource('human-paths')) {
+            // human lines
+            if (!map.getSource('human-paths')) {
+                map.addSource('human-paths', {
+                    type: 'geojson',
+                    data: {
+                        type: 'FeatureCollection',
+                        features: humanLines
+                    }
+                });
+
+                map.addLayer({
+                    id: 'human-paths',
+                    type: 'line',
+                    source: 'human-paths',
+                    paint: {
+                        'line-color': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            '#EDCD3E',
+                            '#ab82c5'
+                        ],
+                        'line-width': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            4,
+                            1.5
+                        ],
+                        'line-opacity': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            1,
+                            0.25
+                        ]
+                    }
+                });
+            } else {
                 map.getSource('human-paths').setData({
                     type: 'FeatureCollection',
                     features: humanLines
                 });
             }
 
-            if (map.getSource('bird-paths')) {
+            // bird lines
+            if (!map.getSource('bird-paths')) {
+                map.addSource('bird-paths', {
+                    type: 'geojson',
+                    data: {
+                        type: 'FeatureCollection',
+                        features: birdLines
+                    }
+                });
+
+                map.addLayer({
+                    id: 'bird-paths',
+                    type: 'line',
+                    source: 'bird-paths',
+                    paint: {
+                        'line-color': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            '#EDCD3E',
+                            '#ab82c5'
+                        ],
+                        'line-width': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            4,
+                            1.5
+                        ],
+                        'line-dasharray': [3, 2],
+                        'line-opacity': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            1,
+                            0.25
+                        ]
+                    }
+                });
+            } else {
                 map.getSource('bird-paths').setData({
                     type: 'FeatureCollection',
                     features: birdLines
                 });
             }
 
-            if (map.getSource('human-circles')) {
+            // human circles
+            if (!map.getSource('human-circles')) {
+                map.addSource('human-circles', {
+                    type: 'geojson',
+                    data: {
+                        type: 'FeatureCollection',
+                        features: humanCircles
+                    }
+                });
+
+                map.addLayer({
+                    id: 'human-circles-fill',
+                    type: 'fill',
+                    source: 'human-circles',
+                    paint: {
+                        'fill-color': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            '#EDCD3E',
+                            '#ab82c5'
+                        ],
+                        'fill-opacity': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            0.18,
+                            0.05
+                        ]
+                    }
+                });
+
+                map.addLayer({
+                    id: 'human-circles-outline',
+                    type: 'line',
+                    source: 'human-circles',
+                    paint: {
+                        'line-color': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            '#EDCD3E',
+                            '#ab82c5'
+                        ],
+                        'line-width': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            3,
+                            1
+                        ],
+                        'line-opacity': [
+                            'case',
+                            ['boolean', ['get', 'highlight'], false],
+                            1,
+                            0.2
+                        ]
+                    }
+                });
+            } else {
                 map.getSource('human-circles').setData({
                     type: 'FeatureCollection',
                     features: humanCircles
