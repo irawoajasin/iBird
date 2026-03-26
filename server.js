@@ -225,6 +225,16 @@ app.get("/admin/summary", async (req, res) => {
   });
 });
 
+app.post("/admin/clear", async (req, res) => {
+  try {
+    await db.run("DELETE FROM lines");
+    res.json({ ok: true, message: "All data cleared" });
+  } catch (err) {
+    console.error("Failed to clear DB:", err);
+    res.status(500).json({ ok: false });
+  }
+});
+
 app.listen(3000, () => {
   console.log("Server on http://localhost:3000");
 });
