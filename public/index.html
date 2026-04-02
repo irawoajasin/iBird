@@ -236,6 +236,14 @@
             'brooklyn', 'queens', 'bronx', 'staten island', 'new york, ny'
         ];
 
+        const NYC_BOROUGH_CENTERS = {
+            manhattan: [-73.9712, 40.7831],
+            brooklyn: [-73.9442, 40.6782],
+            queens: [-73.7949, 40.7282],
+            bronx: [-73.8648, 40.8448],
+            'staten island': [-74.1502, 40.5795]
+        };
+
         const isNYCInput  = s => NYC_ALIASES.includes(s.toLowerCase().trim());
         const isTooClose  = m => m < CIRCLE_THRESHOLD_MILES;
 
@@ -296,7 +304,15 @@
                         return;
                     }
 
-                    const userCoords = data.features[0].center;
+                    const normalizedInput = input.toLowerCase().trim();
+                    const aliasMatch = isNYCInput(normalizedInput);
+
+                    let userCoords = data.features[0].center;
+
+                    // If the user typed an NYC borough / NYC alias, force a local NYC point
+                    if (aliasMatch) {
+                        userCoords = NYC_BOROUGH_CENTERS[normalizedInput] || NYC;
+                    }
 
                     // measure human distance to NYC
                     const humanLine = turf.greatCircle(
@@ -307,7 +323,7 @@
 
                     const userDistance = turf.length(humanLine, { units: 'miles' });
 
-                    const nearNYC = isNYCInput(input) || isTooClose(userDistance);
+                    const nearNYC = aliasMatch || isTooClose(userDistance);
 
                     /* FIND CLOSEST BIRD */
                     let closestBird, closestBirdLine, displayInfo;
@@ -389,9 +405,13 @@
 
         // draw circle for near-nyc
         function drawCircle(userCoords, userDistanceMiles, birdLine, originText) {
+            const normalizedInput = String(originText || '').toLowerCase().trim();
+            const forcedLocalRadius = isNYCInput(normalizedInput);
+            const circleRadiusMiles = forcedLocalRadius ? 8 : Math.max(userDistanceMiles, 8);
+
             const circle = turf.circle(
                 turf.point(NYC),
-                Math.max(userDistanceMiles, 8),
+                circleRadiusMiles,
                 { units: 'miles', steps: 64 }
             );
 
@@ -438,8 +458,8 @@
                         'fill-opacity': [
                             'case',
                             ['boolean', ['get', 'highlight'], false],
-                            0.18,
-                            0.05
+                            0.4,
+                            0.2
                         ]
                     }
                 });
@@ -464,8 +484,8 @@
                         'line-opacity': [
                             'case',
                             ['boolean', ['get', 'highlight'], false],
-                            1,
-                            0.2
+                            0.9,
+                            0.7
                         ]
                     }
                 });
@@ -593,7 +613,7 @@
                             'case',
                             ['boolean', ['get', 'highlight'], false],
                             1,
-                            0.25
+                            0.75
                         ]
                     }
                 });
@@ -636,7 +656,7 @@
                             'case',
                             ['boolean', ['get', 'highlight'], false],
                             1,
-                            0.25
+                            0.75
                         ]
                     }
                 });
@@ -739,7 +759,7 @@
                             'case',
                             ['boolean', ['get', 'highlight'], false],
                             1,
-                            0.25
+                            0.75
                         ]
                     }
                 });
@@ -782,7 +802,7 @@
                             'case',
                             ['boolean', ['get', 'highlight'], false],
                             1,
-                            0.25
+                            0.75
                         ]
                     }
                 });
@@ -817,8 +837,8 @@
                         'fill-opacity': [
                             'case',
                             ['boolean', ['get', 'highlight'], false],
-                            0.18,
-                            0.05
+                            0.4,
+                            0.2
                         ]
                     }
                 });
@@ -843,8 +863,8 @@
                         'line-opacity': [
                             'case',
                             ['boolean', ['get', 'highlight'], false],
-                            1,
-                            0.2
+                            0.9,
+                            0.4
                         ]
                     }
                 });
