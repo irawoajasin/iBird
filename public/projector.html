@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>I Bird NYU</title>
+
+  <link rel="stylesheet" href="style.css">
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+
+  <style>
+    #live-feed {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    #live-feed li {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      transition: background 0.4s, border-color 0.4s;
+      animation: feedSlideIn 0.35s ease both;
+    }
+
+    #map {
+    padding-left: 120vw; /* AK padding for the map to bump right */
+}
+
+    #live-feed li.new-entry {
+      background: rgba(237, 205, 62, 0.18);
+      border-color: #EDCD3E;
+    }
+
+    #live-feed li .feed-origin {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: #fff;
+    }
+
+    #live-feed li .feed-bird {
+      font-size: 0.78rem;
+      color: #ab82c5;
+      font-style: italic;
+    }
+
+    #live-feed li.new-entry .feed-origin,
+    #live-feed li.new-entry .feed-bird {
+      color: #EDCD3E;
+    }
+
+    @keyframes feedSlideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .feed-label {
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 10px;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <div id="ui-panel">
+
+        <!--mobile online handle bar-->
+        <div id="panel-handle">
+            <div class="handle-bar"></div>
+            <div class="handle-row">
+                <span class="handle-title">I Bird NYU</span>
+                <span class="handle-chevron">˅</span>
+            </div>
+        </div>
+
+        <div id="panel-inner">
+            <h1 class="panel-title">Welcome to the I Bird NYU Map</h1>
+            <p class="panel-intro">These birds travel, and so do we! Watch live as people type in where they came from and get matched to a bird that traveled a similar distance to NYC.</p>
+
+            <p class="feed-label">Recent Travelers</p>
+            <ul id="live-feed"></ul>
+
+            <div id="error-msg"></div>
+            <div id="result"></div>
+        </div>
+    </div>
+
+    <script>
+        mapboxgl.accessToken = 'pk.eyJ1IjoiemFyeWFqYXNpbiIsImEiOiJjbG9qbGNhYjMwaWdpMnFtaWMzNTM3Zzl4In0.aeODfKu-L03BARdLrvOZAA';
+
+        const NYC = [-74.0060, 40.7128];
+        const centralPark = [-73.96777, 40.78165];
+        const CIRCLE_THRESHOLD_MILES = 50;
+
+        const map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/dark-v11',
+            center: [-40, 30], //-40 , 30
+            zoom: 1.5
+        });
+
+        let birdFeatures = [];
+        let humanLines = [];
+        let humanCircles = [];
+        let birdLines = [];
+
+        const SERVER_URL = window.location.origin;
+        const MAX_VISIBLE_LINES = 25;
+        const POLL_INTERVAL_MS = 3000;
+        const MAX_FEED_ENTRIES = 10;
+
+        // Track the most-recently-seen entry by its server-assigned id
+        // (or createdAt string as a fallback).
+        let latestKnownId = null;
+        let isFirstLoad = true;  // suppress animation on initial batch load
+        let mapReady = false;
+        let birdDataReady = false;
+
+        const feedEl = document.getElementById('live-feed');
+        // In-memory list of { origin, birdName } – newest first, max 10
+        let feedEntries = [];
+
+        function entryId(row) {
+            // Use whatever unique key the server provides
+            return row.id ?? row._id ?? row.createdAt;
+        }
+
+        function renderFeed(newOrigin = null) {
+            feedEl.innerHTML = '';
+            feedEntries.forEach((entry, i) => {
+                const li = document.createElement('li');
+                const isNew = newOrigin && i === 0;
+                if (isNew) li.classList.add('new-entry');
+                //make input uppercase
+                let upperCase = entry.origin.replace(/\b\w/g, char => char.toUpperCase());
+
+                console.log('birdFeature:',entry);
+                console.log('birdFeature props:', entry?.properties);
+                li.innerHTML = `
+                    <span class="feed-bird"> An NYU community member traveled from </span> <span class="feed-origin"> ${upperCase}</span>
+                    <span class="feed-bird"> And was matched with a </span> <span class="feed-origin">  ${entry.birdName}</span>
+                `;
+                feedEl.appendChild(li);
+
+                // Remove highlight after 4s
+                if (isNew) {
+                    setTimeout(() => li.classList.remove('new-entry'), 4000);
+                }
+            });
+        }
+
+        const NYC_ALIASES = [
+            'nyc', 'new york city', 'new york', 'ny', 'manhattan',
+            'brooklyn', 'queens', 'bronx', 'staten island', 'new york, ny'
+        ];
+        const NYC_BOROUGH_CENTERS = {
+            manhattan: [-73.9712, 40.7831],
+            brooklyn: [-73.9442, 40.6782],
+            queens: [-73.7949, 40.7282],
+            bronx: [-73.8648, 40.8448],
+            'staten island': [-74.1502, 40.5795]
+        };
+        const isNYCInput  = s => NYC_ALIASES.includes(s.toLowerCase().trim());
+        const isTooClose  = m => m < CIRCLE_THRESHOLD_MILES;
+
+        function trimVisibleFeatures() {
+            while (humanLines.length   > MAX_VISIBLE_LINES) humanLines.shift();
+            while (birdLines.length    > MAX_VISIBLE_LINES) birdLines.shift();
+            while (humanCircles.length > MAX_VISIBLE_LINES) humanCircles.shift();
+        }
+
+        function setLoading(on) {
+            // no-op now (no button), kept for compatibility
+        }
+
+        function clearAllHighlights() {
+            [...humanLines, ...birdLines, ...humanCircles].forEach(f => {
+                f.properties = { ...(f.properties || {}), highlight: false };
+            });
+        }
+
+        function refreshAllSources() {
+            if (!mapReady) return;
+
+            // human lines
+            if (!map.getSource('human-paths')) {
+                map.addSource('human-paths', { type: 'geojson', data: { type: 'FeatureCollection', features: humanLines } });
+                map.addLayer({
+                    id: 'human-paths', type: 'line', source: 'human-paths',
+                    paint: {
+                        'line-color':   ['case', ['boolean', ['get', 'highlight'], false], '#EDCD3E', '#ab82c5'],
+                        'line-width':   ['case', ['boolean', ['get', 'highlight'], false], 4, 1.5],
+                        'line-opacity': ['case', ['boolean', ['get', 'highlight'], false], 1, 0.75]
+                    }
+                });
+            } else {
+                map.getSource('human-paths').setData({ type: 'FeatureCollection', features: humanLines });
+            }
+
+            // bird lines
+            if (!map.getSource('bird-paths')) {
+                map.addSource('bird-paths', { type: 'geojson', data: { type: 'FeatureCollection', features: birdLines } });
+                map.addLayer({
+                    id: 'bird-paths', type: 'line', source: 'bird-paths',
+                    paint: {
+                        'line-color':      ['case', ['boolean', ['get', 'highlight'], false], '#EDCD3E', '#ab82c5'],
+                        'line-width':      ['case', ['boolean', ['get', 'highlight'], false], 4, 1.5],
+                        'line-dasharray':  [3, 2],
+                        'line-opacity':    ['case', ['boolean', ['get', 'highlight'], false], 1, 0.75]
+                    }
+                });
+            } else {
+                map.getSource('bird-paths').setData({ type: 'FeatureCollection', features: birdLines });
+            }
+
+            // human circles
+            if (!map.getSource('human-circles')) {
+                map.addSource('human-circles', { type: 'geojson', data: { type: 'FeatureCollection', features: humanCircles } });
+                map.addLayer({
+                    id: 'human-circles-fill', type: 'fill', source: 'human-circles',
+                    paint: {
+                        'fill-color':   ['case', ['boolean', ['get', 'highlight'], false], '#EDCD3E', '#ab82c5'],
+                        'fill-opacity': ['case', ['boolean', ['get', 'highlight'], false], 0.4, 0.2]
+                    }
+                });
+                map.addLayer({
+                    id: 'human-circles-outline', type: 'line', source: 'human-circles',
+                    paint: {
+                        'line-color':   ['case', ['boolean', ['get', 'highlight'], false], '#EDCD3E', '#ab82c5'],
+                        'line-width':   ['case', ['boolean', ['get', 'highlight'], false], 3, 1],
+                        'line-opacity': ['case', ['boolean', ['get', 'highlight'], false], 0.9, 0.4]
+                    }
+                });
+            } else {
+                map.getSource('human-circles').setData({ type: 'FeatureCollection', features: humanCircles });
+            }
+        }
+
+        function ingestRow(row, animate) {
+            const rawHuman  = row.feature_geojson   || row.featureGeoJSON;
+            const rawBird   = row.bird_feature_geojson || row.birdFeatureGeoJSON;
+            const geometryType = row.geometry_type  || row.geometryType;
+            const origin    = row.origin || '—';
+            const distMiles = row.user_distance_miles ?? row.userDistanceMiles ?? 0;
+
+            const humanFeature = rawHuman ? (typeof rawHuman === 'string' ? JSON.parse(rawHuman) : rawHuman) : null;
+            const birdFeature  = rawBird  ? (typeof rawBird  === 'string' ? JSON.parse(rawBird)  : rawBird)  : null;
+
+            let birdName = '—';
+            if (birdFeature && birdFeature.properties && birdFeature.properties.common_name) {
+                birdName = birdFeature.properties.common_name;
+            }
+
+            // ── Update feed list ──
+            feedEntries.unshift({ origin, birdName });
+            if (feedEntries.length > MAX_FEED_ENTRIES) feedEntries.pop();
+            renderFeed(animate ? origin : null);
+
+            if (!mapReady) return;
+
+            if (animate) clearAllHighlights();
+
+            if (humanFeature) {
+                humanFeature.properties = { ...(humanFeature.properties || {}), highlight: animate };
+                if (geometryType === 'circle') humanCircles.push(humanFeature);
+                else                           humanLines.push(humanFeature);
+            }
+
+            if (birdFeature) {
+                birdFeature.properties = { ...(birdFeature.properties || {}), highlight: animate };
+                birdLines.push(birdFeature);
+            }
+
+            trimVisibleFeatures();
+            refreshAllSources();
+
+            if (animate) {
+                // Fly to appropriate location
+                if (geometryType === 'circle') {
+                    map.flyTo({ center: NYC, zoom: 9, speed: 0.6, curve: 1.4 });
+                } else if (humanFeature) {
+                    // Fly to the start of the human path (origin point)
+                    const coords = humanFeature.geometry.coordinates;
+                    const originCoord = coords[0];
+                    map.flyTo({ center: originCoord, zoom: 3, speed: 0.6, curve: 1.4 });
+                }
+            }
+        }
+
+        async function pollServer() {
+            try {
+                const res  = await fetch(`${SERVER_URL}/lines?limit=${MAX_VISIBLE_LINES}`);
+                const rows = await res.json();
+
+                if (!rows || !rows.length) return;
+
+                if (isFirstLoad) {
+                    // Seed latestKnownId from the newest row
+                    // Server returns newest-first OR oldest-first — detect ordering:
+                    // We'll just mark the whole current batch as seen without animating.
+                    latestKnownId = entryId(rows[0]);
+
+                    // Load all as background (no animation, reversed so oldest is on top)
+                    [...rows].reverse().forEach(row => ingestRow(row, false));
+
+                    isFirstLoad = false;
+                    return;
+                }
+
+                // Find genuinely new rows (id not yet seen)
+                // rows[0] is assumed to be the latest entry from the server
+                const newRows = [];
+                for (const row of rows) {
+                    if (entryId(row) === latestKnownId) break;
+                    newRows.push(row);
+                }
+
+                if (!newRows.length) return;
+
+                // Update the watermark
+                latestKnownId = entryId(rows[0]);
+
+                // Animate newest entry only; add the rest silently
+                // newRows is newest-first, so animate index 0, silently add the rest
+                newRows.reverse(); // oldest-first so we push them in order
+                newRows.forEach((row, i) => {
+                    const isNewest = i === newRows.length - 1;
+                    ingestRow(row, isNewest);
+                });
+
+            } catch (err) {
+                console.error('Poll error:', err);
+            }
+        }
+
+        const panel  = document.getElementById('ui-panel');
+        const handle = document.getElementById('panel-handle');
+
+        handle.addEventListener('click', () => {
+            if (window.innerWidth <= 640) panel.classList.toggle('collapsed');
+        });
+
+        function syncPanelState() {
+            if (window.innerWidth <= 640) {
+                if (!panel.classList.contains('has-result')) panel.classList.add('collapsed');
+            } else {
+                panel.classList.remove('collapsed');
+            }
+        }
+
+        window.addEventListener('resize', syncPanelState);
+        syncPanelState();
+
+        map.on('load', async () => {
+            mapReady = true;
+
+            // Load bird CSV
+            fetch('jack_birds_cleaned.csv')
+                .then(r => r.text())
+                .then(csvText => {
+                    const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+
+                    birdFeatures = parsed.data.map(row => {
+                        const common_name = row['Common-Name'].trim();
+                        const loc_direct  = row['Location-Direct'].trim();
+                        const lat         = parseFloat(row['Lat']);
+                        const lng         = parseFloat(row['Lng']);
+                        const dist_total  = parseFloat(row['Distance-to-NYC']);
+                        const copy        = row['Copy-Direct'].trim();
+                        const ebird_link  = row['Ebird-Link'].trim();
+                        const img_link    = row['Image-Link'].trim();
+
+                        if (isNaN(lat) || isNaN(lng)) return null;
+
+                        const line = turf.greatCircle(
+                            turf.point([lng, lat]),
+                            turf.point(NYC),
+                            { npoints: 200 }
+                        );
+                        const distance = turf.length(line, { units: 'miles' });
+                        line.properties = { distance, common_name, lat, lng, loc_direct, dist_total, ebird_link, copy, img_link };
+                        return line;
+                    }).filter(f => f !== null);
+
+                    console.log('Birds loaded:', birdFeatures.length);
+                    birdDataReady = true;
+
+                    // Kick off polling once both map and bird data are ready
+                    pollServer();
+                    setInterval(pollServer, POLL_INTERVAL_MS);
+                });
+        });
+
+    </script>
+
+</body>
+</html>
