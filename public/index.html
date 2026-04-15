@@ -67,7 +67,7 @@
         let birdLines = [];
 
         const SERVER_URL = window.location.origin;
-        const MAX_VISIBLE_LINES = 25;
+        const MAX_VISIBLE_LINES = 50;
 
         let sessionId = localStorage.getItem("ibird-session-id");
         if (!sessionId) {
@@ -133,7 +133,9 @@
         });
 
         if (window.innerWidth <= 640) {
-            panel.classList.add('collapsed');
+            // panel.classList.add('collapsed');
+            //AK re-add the above if we want the panel to start collapsed 
+            console.log("");
         }
 
         // load bird data
@@ -697,7 +699,9 @@
         function syncPanelState() {
             if (window.innerWidth <= 640) {
                 if (!panel.classList.contains('has-result')) {
-                    panel.classList.add('collapsed');
+                    // panel.classList.add('collapsed');
+                    //ak add this back if we want to panel to start closed
+                    console.log("");
                 }
             } else {
                 panel.classList.remove('collapsed');
